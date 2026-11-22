@@ -38,16 +38,39 @@ def interpolate(start, end, fraction):
     return [a + (b - a) * fraction for a, b in zip(start, end)]
 
 
-def offset_loop(points, edge_lengths, offset):
+def sample_loop(points, edge_lengths, point_budget):
+    sampled = [points[0]]
+    extra_points = point_budget - len(points)
+    perimeter = sum(edge_lengths)
+    for start, end, length in zip(points, points[1:], edge_lengths):
+        interior = min(int(length / 14), int(extra_points * length / perimeter))
+        sampled.extend(interpolate(start, end, step / (interior + 1)) for step in range(1, interior + 1))
+        sampled.append(end)
+    return sampled
+
+
+def offset_loop(points, edge_lengths, lap_index, drift_pixels):
     normals = [
         (-(b[1] - a[1]) / length, (b[0] - a[0]) / length)
         for a, b, length in zip(points, points[1:], edge_lengths)
     ]
     offset_points = []
+    traveled = 0
+    perimeter = sum(edge_lengths)
+    phase = (lap_index + 1) * 0.61803398875
     for index, point in enumerate(points[:-1]):
+        progress = traveled / perimeter
+        # Shared stretches anchor the loops. The signed drift varies within each intervening stretch.
+        window = max(0, (abs(math.sin(3 * math.pi * progress)) - 0.62) / 0.38)
+        drift = (
+            0.75 * math.sin(math.tau * (2 * progress + phase)) +
+            0.25 * math.sin(math.tau * (3 * progress - 2 * phase))
+        )
+        offset = drift_pixels * window ** 2 * drift
         before, after = normals[index - 1], normals[index]
         divisor = max(0.5, 1 + sum(a * b for a, b in zip(before, after)))
         offset_points.append([value + offset * (a + b) / divisor for value, a, b in zip(point, before, after)])
+        traveled += edge_lengths[index]
     return offset_points + offset_points[:1]
 
 
@@ -72,7 +95,7 @@ def make_laps(points, loop, distance, width, height):
     if not isinstance(loop, dict):
         raise ValueError("loop must be an object")
     lap_meters = positive_number(loop.get("distanceMeters"), "loop distanceMeters")
-    spacing = positive_number(loop.get("spacingPixels"), "loop spacingPixels")
+    drift = positive_number(loop.get("driftPixels", loop.get("spacingPixels")), "loop driftPixels")
     edges = lengths(points)
     if len(points) < 4 or points[0] != points[-1] or any(length <= 0 for length in edges):
         raise ValueError("loop requires one closed centerline with distinct consecutive points")
@@ -84,12 +107,15 @@ def make_laps(points, loop, distance, width, height):
     count = int(full) + bool(partial)
     if count * len(points) > 100000:
         raise ValueError("repeated route exceeds 100,000 points")
+    if count > 1:
+        points = sample_loop(points, edges, 100000 // count)
+        edges = lengths(points)
     meter_scale = lap_meters / sum(edges)
     edge_meters = [edge * meter_scale for edge in edges]
     paths = []
     all_meters = []
     for index in range(count):
-        path = offset_loop(points, edges, spacing * (index - (count - 1) / 2))
+        path = offset_loop(points, edges, index, drift) if count > 1 else points
         meters = edge_meters
         if partial and index == count - 1:
             path, meters = trim_path(path, edge_meters, partial)
