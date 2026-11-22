@@ -277,9 +277,6 @@
             border: 2px solid #c5e4a4;
             font-size: 15px;
         }
-        .guijiSelect {
-            display: none;
-        }
         .warning {
             font-size: 20px;
             padding: 1rem 0 0 0;
@@ -465,11 +462,7 @@
                 <hr />
                 <li>
                     <label>背景：</label>
-                    <select onchange="default_bgImgSelect_onChange()" id="default_bgImgSelect">
-                        <option value="guiji_Select_1">南体育场</option>
-                        <option value="guiji_Select_2">军工操场</option>
-                        <option value="guiji_Select_3">北体育场</option>
-                    </select>
+                    <span>展示场景</span>
                 </li>
                 <li>
                     <label>自定义背景：</label>
@@ -478,20 +471,14 @@
                     <button onclick="init_bgimg()" class="init-btn", id="setbgimg_reset_btn">恢复默认</button>
                 </li>
                 <li>
-                    <label>预设轨迹：</label>
-                    <select onchange="guijiSelect_onChange()" id="guiji_Select_1" class="guijiSelect">
-                        <option value="['images/bg1_1.png', 'images/bg1_empty2.png']">预设1</option>
-                        <option value="['images/bg1_2.png', 'images/bg1_empty2.png']">预设2</option>
-                        <option value="['images/bg1_3.png', 'images/bg1_empty2.png']">预设3</option>
-                        <option value="['images/bg1_4.png', 'images/bg1_empty2.png']">预设4</option>
-                        <option value="['images/bg1_5.png', 'images/bg1_empty2.png']">预设5</option>
-                        <option value="['images/bg1_empty2.png', 'images/bg1_empty2.png']">空</option>
-                    </select>
-                    <select onchange="guijiSelect_onChange()" id="guiji_Select_2" class="guijiSelect">
-                        <option value="['images/bg2_empty.png', 'images/bg2_empty.png']">空</option>
-                    </select>
-                    <select onchange="guijiSelect_onChange()" id="guiji_Select_3" class="guijiSelect">
-                        <option value="['images/bg3_empty.png', 'images/bg3_empty.png']">空</option>
+                    <label for="preset-route">预设轨迹：</label>
+                    <select onchange="guijiSelect_onChange()" id="preset-route">
+                        <option value="images/bg1_1.png">预设1</option>
+                        <option value="images/bg1_2.png">预设2</option>
+                        <option value="images/bg1_3.png">预设3</option>
+                        <option value="images/bg1_4.png">预设4</option>
+                        <option value="images/bg1_5.png">预设5</option>
+                        <option value="images/bg1_empty2.png">空</option>
                     </select>
                 </li>
                 <li>
@@ -611,7 +598,6 @@
         var miles, speeds, username, keep_title, date_year, date_month, date_day, time_hour, time_min, temperature, humidity, savePic_width;
         var bgSRC = "", ptSRC = "";
         var durationSeconds = null;
-        var display_guijiSelect_id;
         var default_bgSRC = [];
         var use_default_bg = true;
 
@@ -686,13 +672,6 @@
             document.getElementById("inpt_savePic_width").value = savePic_width;
             document.getElementById("gui-img").src = gui_img_src;
             document.getElementById("portrait").src = default_portrait_scr;
-            let bgimg_select = document.getElementById("default_bgImgSelect");
-            for (let i = 0; i < bgimg_select.options.length; i ++) {
-                let guijiSelect = document.getElementById(bgimg_select.options[i].value);
-                for (let j = 0; j < guijiSelect.options.length; j ++) {
-                    guijiSelect.options[j].value = '[\"' + String(eval(guijiSelect.options[j].value)[0] + "?_=" + new Date().getTime()) + '\", \"' + String(eval(guijiSelect.options[j].value)[1] + "?_=" + new Date().getTime()) + '\"]';
-                }
-            }
             let weather_select = document.getElementById("weather_Select");
             for (let i = 0; i < weather_select.options.length; i ++) {
                 weather_select.options[i].value = weather_select.options[i].value + "?_=" + new Date().getTime();
@@ -726,23 +705,10 @@
             document.getElementById("calorie").textContent = calorie;
         }
 
-        //选择预设图片
-        function default_bgImgSelect_onChange() {
-            if (display_guijiSelect_id) {
-                document.getElementById(display_guijiSelect_id).style.display = "none";
-            }
-            display_guijiSelect_id = document.getElementById("default_bgImgSelect").value;
-            document.getElementById(display_guijiSelect_id).style.display = "inline"
-            default_bgSRC = eval(document.getElementById(display_guijiSelect_id).value);
-            use_default_bg = true;
-            document.getElementById("setbgimg_reset_btn").className = "init-btn";
-            setbgImg(default_bgSRC[0]);
-        }
+        //切换展示场景中的预设轨迹
         function guijiSelect_onChange() {
-            default_bgSRC = eval(document.getElementById(display_guijiSelect_id).value);
-            use_default_bg = true;
-            document.getElementById("setbgimg_reset_btn").className = "init-btn";
-            setbgImg(default_bgSRC[0]);
+            default_bgSRC = [document.getElementById("preset-route").value, "images/bg1_empty2.png"];
+            init_bgimg();
         }
         //选择天气
         function weather_Select_onChange() {
@@ -1140,7 +1106,7 @@
 
             initInputData();
 
-            default_bgImgSelect_onChange();
+            guijiSelect_onChange();
             weather_Select_onChange();
             inpt_colorchange_checkbox_onchange();
 
