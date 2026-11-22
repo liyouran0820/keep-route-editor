@@ -12,6 +12,7 @@
     const SCALE = 3;
     const DEFAULT_COLOR = "#26c99a";
     const COLORS = ["#26c99a", "#48ddad", "#b7ed75", "#f1d96e", "#ff9868", "#35c8d5"];
+    const PACE_COLORS = ["#109cd1", "#129f94", "#38a75f", "#dca626", "#db6746"];
 
     const layer = document.createElement("canvas");
     layer.id = "editable-route-layer";
@@ -36,6 +37,7 @@
     let seed = 1;
     let revision = 0;
     let fitOnLoad = false;
+    let paceRange = null;
 
     function notify(message = "", error = false) {
         $("route-status").textContent = message;
@@ -114,8 +116,24 @@
         };
     }
 
-    function drawPaths(paths, frame) {
+    function getPaceRange(paces) {
+        const values = paces?.flat().filter(value => value != null).sort((a, b) => a - b);
+        if (!values?.length) return null;
+        const last = values.length - 1;
+        return [values[Math.floor(last * 0.1)], values[Math.ceil(last * 0.9)]];
+    }
+
+    function paceColor(pace) {
+        if (pace === null) return DEFAULT_COLOR;
+        const [fast, slow] = paceRange;
+        if (slow - fast < 1) return PACE_COLORS[2];
+        return PACE_COLORS[Math.round(clamp((pace - fast) / (slow - fast), 0, 1) * (PACE_COLORS.length - 1))];
+    }
+
+    function drawPaths(paths, frame, active) {
         const enabled = $("inpt_colorchange_checkbox").checked;
+        const paces = !enabled && paceRange && active?.paces;
+        const multipleLaps = active?.lapInfo && paths.length > 1;
         const probability = clamp(Number($("inpt_bs_prob").value) || 0, 0, 1);
         const min = clamp(Number($("inpt_bs_range_min").value) || 15, 2, 150);
         const max = clamp(Number($("inpt_bs_range_max").value) || 40, min, 200);
@@ -133,11 +151,21 @@
 
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
-        for (const path of paths) {
+        for (const [pathIndex, path] of paths.entries()) {
             const points = path.map(point => position(point, frame));
-            ctx.lineWidth = 6.5;
+            ctx.lineWidth = multipleLaps ? 2.9 : 6.5;
             line(points, "#ffffffbd");
-            ctx.lineWidth = 4.6;
+            ctx.lineWidth = multipleLaps ? 1.9 : 4.6;
+            if (paces) {
+                let start = 0;
+                const colors = paces[pathIndex].map(paceColor);
+                for (let i = 1; i <= colors.length; i += 1) {
+                    if (colors[i] === colors[start]) continue;
+                    line(points.slice(start, i + 1), colors[start]);
+                    start = i;
+                }
+                continue;
+            }
             if (!enabled) {
                 line(points, DEFAULT_COLOR);
                 continue;
@@ -179,11 +207,12 @@
             const [x, y] = transform([full.x, full.y]);
             ctx.drawImage(background, x, y, full.width * view.zoom, full.height * view.zoom);
         }
-        if (paths?.length) drawPaths(paths, frame);
+        if (paths?.length) drawPaths(paths, frame, active);
     }
 
     function sync() {
         $("route-shuffle").disabled = !route;
+        $("route-pace").hidden = !route?.paces || !paceRange;
         $("route-fit").disabled = !route;
         $("route-clear").disabled = !route;
         $("route-zoom").value = view.zoom;
@@ -210,6 +239,11 @@
         setData();
     }
 
+    function describePace(imported) {
+        return imported.paceSource === "simulated" ?
+            "示意配速（青色快，橙红色慢）。" : "按分段配速着色（青色快，橙红色慢）。";
+    }
+
     async function importFile(file) {
         const request = ++revision;
         try {
@@ -219,6 +253,11 @@
                 ? parseGpx(text, file.name) : parseTrace(text);
             if (request !== revision) return;
             route = imported;
+            paceRange = getPaceRange(route.paces);
+            if (paceRange) {
+                $("inpt_colorchange_checkbox").checked = false;
+                inpt_colorchange_checkbox_onchange();
+            }
             applyRecord(imported);
             setMode(null);
             if (route.kind === "trace") useCleanPreset();
@@ -226,7 +265,10 @@
             const distance = route.distanceMeters === null ? "距离待填写" :
                 (route.distanceMethod && route.distanceMethod !== "user-supplied" ? "约 " : "") +
                 (route.distanceMeters / 1000).toFixed(2) + " 公里";
-            notify(route.name + " · " + distance + "。" +
+            const lap = route.lapInfo;
+            const laps = lap ? " · " + lap.full + " 圈" +
+                (lap.partialMeters ? " + " + Number(lap.partialMeters.toFixed(2)) + " 米" : "") : "";
+            notify(route.name + " · " + distance + laps + "。" + (paceRange ? describePace(route) : "") +
                 (route.kind === "trace" ? "上传描线所用的原图以对齐路线。" : "GPX 已按路线形状绘制，普通图片可作为背景。"));
         } catch (error) {
             if (request === revision) notify(error instanceof SyntaxError ? "无法读取路线 JSON，请检查文件格式。" : error.message, true);
@@ -340,6 +382,12 @@
         inpt_colorchange_checkbox_onchange();
         draw();
         notify("已重新生成轨迹配色。");
+    });
+    $("route-pace").addEventListener("click", () => {
+        $("inpt_colorchange_checkbox").checked = false;
+        inpt_colorchange_checkbox_onchange();
+        draw();
+        notify(describePace(route));
     });
     for (const id of ["inpt_colorchange_checkbox", "inpt_bs_prob", "inpt_bs_range_min", "inpt_bs_range_max"]) {
         $(id).addEventListener("change", draw);

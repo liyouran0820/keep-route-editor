@@ -84,7 +84,10 @@
     let durationSeconds = 0;
     let startTime = null;
     let allSegmentsTimed = true;
+    const paces = [];
     const projected = segments.map(points => {
+      const edgePaces = [];
+      paces.push(edgePaces);
       const first = points[0].time;
       const last = points.at(-1).time;
       if (Number.isFinite(first)) startTime = Math.min(startTime ?? first, first);
@@ -92,7 +95,13 @@
       else allSegmentsTimed = false;
 
       return points.map((point, i) => {
-        if (i > 0) distanceMeters += gpsDistance(points[i - 1], point);
+        if (i > 0) {
+          const previous = points[i - 1];
+          const meters = gpsDistance(previous, point);
+          const seconds = (point.time - previous.time) / 1000;
+          distanceMeters += meters;
+          edgePaces.push(meters >= 1 && Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 / meters : null);
+        }
         const x = ((point.lon - origin.lon + 540) % 360 - 180) * cosLat;
         const y = origin.lat - point.lat;
         bounds.minX = Math.min(bounds.minX, x);
@@ -116,7 +125,40 @@
       strokes, distanceMeters,
       durationSeconds: allSegmentsTimed && durationSeconds > 0 ? Math.round(durationSeconds) : null,
       startedAt: startTime,
+      paces: paces.some(segments => segments.some(pace => pace !== null)) ? paces : null,
+      paceSource: "recorded",
     };
+  }
+
+  function parseTracePaces(route) {
+    const { segments, paces, paceSource, durationSeconds } = route;
+    if (paces == null) return { paces: null, paceSource: null, durationSeconds: null };
+    if (!Array.isArray(paces) || paces.length !== segments.length ||
+        paces.some((edges, index) => !Array.isArray(edges) || edges.length !== segments[index].length - 1 ||
+          edges.some(pace => pace !== null && !(Number.isFinite(pace) && pace > 0)))) {
+      throw new Error("配速 JSON 需为每条路线线段提供对应的秒/公里数值。");
+    }
+    if (!["recorded", "simulated"].includes(paceSource)) {
+      throw new Error("配速须标明实测或示意来源。");
+    }
+    if (durationSeconds != null && !(Number.isSafeInteger(durationSeconds) && durationSeconds >= 0)) {
+      throw new Error("运动用时须为非负整数秒。");
+    }
+    return { paces, paceSource, durationSeconds: durationSeconds ?? null };
+  }
+
+  function parseTraceLaps(route) {
+    const lap = route.lapInfo;
+    if (lap == null) return null;
+    const { distanceMeters, full, partialMeters } = lap;
+    if (!(Number.isFinite(distanceMeters) && distanceMeters > 0 && Number.isSafeInteger(full) && full >= 0 &&
+        Number.isFinite(partialMeters) && partialMeters >= 0 && partialMeters < distanceMeters) ||
+        full + Number(partialMeters > 0) !== route.segments.length ||
+        !Number.isFinite(route.distanceMeters) ||
+        Math.abs(full * distanceMeters + partialMeters - route.distanceMeters) > 0.001) {
+      throw new Error("圈数、单圈长度和剩余距离需与总距离及轨迹一致。");
+    }
+    return lap;
   }
 
   function parseTrace(text) {
@@ -149,6 +191,8 @@
       distanceMethod: ["scale-bar", "known-segment", "user-supplied"].includes(route.distanceMethod)
         ? route.distanceMethod : null,
       size: hasSize ? sceneSize(route.imageWidth, route.imageHeight) : null,
+      ...parseTracePaces(route),
+      lapInfo: parseTraceLaps(route),
     };
   }
 
