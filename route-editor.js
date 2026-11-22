@@ -13,6 +13,8 @@
     const DEFAULT_COLOR = "#26c99a";
     const COLORS = ["#26c99a", "#48ddad", "#b7ed75", "#f1d96e", "#ff9868", "#35c8d5"];
     const PACE_COLORS = [[29, 159, 211], [19, 176, 161], [28, 178, 112], [223, 167, 43], [220, 100, 69]];
+    const PIN_SIZE = 38;
+    const PIN_TIP = 145 / 180;
 
     const layer = document.createElement("canvas");
     layer.id = "editable-route-layer";
@@ -38,6 +40,16 @@
     let revision = 0;
     let fitOnLoad = false;
     let paceRange = null;
+
+    const startPin = loadPin(start_sign_src);
+    const finishPin = loadPin(end_sign_src);
+
+    function loadPin(src) {
+        const image = new Image();
+        image.onload = draw;
+        image.src = src;
+        return image;
+    }
 
     function notify(message = "", error = false) {
         $("route-status").textContent = message;
@@ -204,6 +216,40 @@
         }
     }
 
+    function drawEndpoints(paths, frame) {
+        if (!startPin.naturalWidth || !finishPin.naturalWidth) return;
+        const start = transform(position(paths[0][0], frame));
+        const finish = transform(position(paths.at(-1).at(-1), frame));
+        const nearby = Math.hypot(start[0] - finish[0], start[1] - finish[1]) < 22;
+
+        function pin(image, tip, anchor) {
+            if (anchor) {
+                ctx.beginPath();
+                ctx.moveTo(...anchor);
+                ctx.lineTo(...tip);
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = "#ffffff";
+                ctx.stroke();
+            }
+            ctx.drawImage(image, tip[0] - PIN_SIZE / 2, tip[1] - PIN_SIZE * PIN_TIP, PIN_SIZE, PIN_SIZE);
+        }
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, WIDTH, MAP_HEIGHT);
+        ctx.clip();
+        if (nearby) {
+            const x = clamp((start[0] + finish[0]) / 2, 24, WIDTH - 24);
+            const y = Math.max(25, Math.min(start[1], finish[1]) - 9);
+            pin(startPin, [x - 12, y], start);
+            pin(finishPin, [x + 12, y], finish);
+        } else {
+            pin(startPin, start);
+            pin(finishPin, finish);
+        }
+        ctx.restore();
+    }
+
     function draw() {
         const draft = stroke?.length > 1;
         const paths = draft ? [...(route?.kind === "manual" ? route.strokes : []), stroke] : route?.strokes;
@@ -218,7 +264,10 @@
             const [x, y] = transform([full.x, full.y]);
             ctx.drawImage(background, x, y, full.width * view.zoom, full.height * view.zoom);
         }
-        if (paths?.length) drawPaths(paths, frame, active);
+        if (paths?.length) {
+            drawPaths(paths, frame, active);
+            drawEndpoints(paths, frame);
+        }
     }
 
     function sync() {
