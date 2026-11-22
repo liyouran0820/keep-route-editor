@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
@@ -345,6 +345,36 @@
             overflow: hidden;
             justify-content: center;
         }
+        #editable-route-layer {
+            position: absolute;
+            inset: 0;
+            width: 360px;
+            height: 719px;
+            pointer-events: none;
+        }
+        #editable-route-pointer {
+            position: absolute;
+            inset: 0 0 auto;
+            height: 335px;
+            touch-action: none;
+            cursor: crosshair;
+        }
+        #editable-route-pointer[data-mode="pan"] {
+            cursor: grab;
+        }
+        #editable-route-pointer[data-mode="pan"]:active {
+            cursor: grabbing;
+        }
+        #route-file { display: none; }
+        .set-data #inpt_duration { width: 120px; }
+        #route-clear:disabled, #route-fit:disabled, #route-shuffle:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+        #route-status { font-size: 14px; overflow-wrap: anywhere; }
+        #route-status:empty { display: none; }
+        #route-status[data-error="true"] { color: #9d2929; }
+        #route-zoom { width: 105px; vertical-align: middle; }
     </style>
 </head>
 <body id="body">
@@ -393,11 +423,15 @@
                 <hr />
                 <li>
                     <label>公里：</label>
-                    <input type="number" min="0" max="20" id="inpt_miles" onchange="setData()" class="mile2-inp">
+                    <input type="number" min="0" step="any" id="inpt_miles" onchange="setData()" class="mile2-inp">
                 </li>
                 <li>
                     <label>配速：</label>
-                    <input id="inpt_speeds" onchange="setData()" type="text">
+                    <input id="inpt_speeds" onchange="document.getElementById('inpt_duration').value = ''; setData()" type="text" placeholder="05:30">
+                </li>
+                <li>
+                    <label for="inpt_duration">用时：</label>
+                    <input id="inpt_duration" onchange="setData()" type="text" placeholder="可选，如 00:28:41">
                 </li>
                 <li>
                     <label>时间：</label>
@@ -480,6 +514,26 @@
                 </li>
                 <hr />
                 <li>
+                    <label for="route-file">可编辑轨迹：</label>
+                    <input id="route-file" type="file" accept=".gpx,.json,application/gpx+xml,application/json">
+                    <button id="route-import" type="button" title="支持 GPX 和路线 JSON">导入轨迹</button>
+                    <button id="route-draw" type="button" aria-pressed="false">手绘</button>
+                    <button id="route-clear" type="button" disabled>清除</button>
+                </li>
+                <li>
+                    <button id="route-shuffle" type="button" disabled>随机配色</button>
+                    <button id="route-fit" type="button" disabled>适配路线</button>
+                </li>
+                <li>
+                    <label for="route-zoom">底图缩放：</label>
+                    <input id="route-zoom" type="range" min="0.04" max="4" step="0.01" value="1">
+                    <output id="route-zoom-value" for="route-zoom">100%</output>
+                    <button id="route-pan" type="button" aria-pressed="false">移动底图</button>
+                    <button id="route-reset-view" type="button">恢复取景</button>
+                </li>
+                <li id="route-status" role="status" aria-live="polite"></li>
+                <hr />
+                <li>
                     <label>图片宽度：</label>
                     <input id="inpt_savePic_width" onchange="setData()" type="text">
                 </li>
@@ -552,9 +606,11 @@
         </div>
     </div>
     <script src="./html2canvas.min.js"></script>
+    <script src="./route.js"></script>
     <script type="text/javascript">
         var miles, speeds, username, keep_title, date_year, date_month, date_day, time_hour, time_min, temperature, humidity, savePic_width;
         var bgSRC = "", ptSRC = "";
+        var durationSeconds = null;
         var display_guijiSelect_id;
         var default_bgSRC = [];
         var use_default_bg = true;
@@ -595,7 +651,8 @@
             username      = document.getElementById("inpt_username").value;
             keep_title    = document.getElementById("inpt_keep_title").value;
             miles         = parseFloat(document.getElementById("inpt_miles").value);
-            speeds        = parseFloat(document.getElementById("inpt_speeds").value);
+            speeds        = readPace(document.getElementById("inpt_speeds").value);
+            durationSeconds = RunRoute.parseClock(document.getElementById("inpt_duration").value, 3);
             date_year     = parseInt(document.getElementById("inpt_year").value);
             date_month    = parseInt(document.getElementById("inpt_month").value);
             date_day      = parseInt(document.getElementById("inpt_day").value);
@@ -615,7 +672,7 @@
             document.getElementById("inpt_username").value = username;
             document.getElementById("inpt_keep_title").value = keep_title;
             document.getElementById("inpt_miles").value = miles;
-            document.getElementById("inpt_speeds").value = speeds;
+            document.getElementById("inpt_speeds").value = RunRoute.formatClock(speeds);
             document.getElementById("inpt_year").value = date_year;
             document.getElementById("inpt_month").value = date_month;
             document.getElementById("inpt_day").value = date_day;
@@ -642,29 +699,31 @@
             }
         }
 
-        //渲染, 将输入的内容放到图片的对应位置
+        function readPace(text) {
+            if (text.includes(":")) return RunRoute.parseClock(text, 2);
+            const value = text.trim();
+            if (!/^\d{1,5}(\.[0-5]\d?)?$/.test(value)) return null;
+            const [minutes, seconds = ""] = value.split(".");
+            return Number(minutes) * 60 + Number(seconds.padEnd(2, "0"));
+        }
+
         function rander() {
-            let miles_int = Math.floor(miles);
-            let miles_dec = Math.round((miles - miles_int) * 100);
-            let speeds_int = Math.floor(speeds);
-            let speeds_dec = Math.round((speeds - speeds_int) * 100);
-            let times = (speeds_dec / 60 + speeds_int) * miles;
-            let timeInc = Math.trunc(times);
-            let cost_hour = Math.floor(timeInc / 60);
-            let cost_min = timeInc % 60;
-            let cost_sec = Math.round((times - timeInc) * 60);
-            let calorie = Math.round(69 * miles * 1.036);
-            document.getElementById("mile").innerHTML = String(miles_int) + "." + String(addZero(miles_dec));
-            document.getElementById("date").innerHTML = String(date_year) + "/" + addZero(date_month) + "/" + addZero(date_day);
-            document.getElementById("time").innerHTML = addZero(time_hour) + ":" + addZero(time_min);
-            document.getElementById("temperature").innerHTML = String(temperature) + "℃";
-            document.getElementById("humidity").innerHTML = String(humidity) + "%";
-            document.getElementById("username").innerHTML = username;
-            document.getElementById("keep-title").innerHTML = "Keep&nbsp;•&nbsp;" + keep_title;
-            
-            document.getElementById("speed").innerHTML = String(addZero(speeds_int)) + "'" + String(addZero(speeds_dec)) + '"';
-            document.getElementById("cost-time").innerHTML = String(addZero(cost_hour)) + ":" + String(addZero(cost_min)) + ":" + String(addZero(cost_sec));
-            document.getElementById("calorie").innerHTML = addZero(calorie);
+            const distance = Number.isFinite(miles) && miles >= 0 ? miles : null;
+            const pace = durationSeconds !== null && distance > 0 ? Math.round(durationSeconds / distance) : speeds;
+            const total = durationSeconds ?? (distance !== null && pace !== null ? distance * pace : null);
+            const distanceText = distance === null ? "—" : distance.toFixed(2);
+            const paceText = pace === null ? "—" : RunRoute.formatClock(pace).replace(":", "'") + '"';
+            const calorie = distance === null ? "—" : addZero(Math.round(69 * distance * 1.036));
+            document.getElementById("mile").textContent = distanceText;
+            document.getElementById("date").textContent = String(date_year) + "/" + addZero(date_month) + "/" + addZero(date_day);
+            document.getElementById("time").textContent = addZero(time_hour) + ":" + addZero(time_min);
+            document.getElementById("temperature").textContent = String(temperature) + "℃";
+            document.getElementById("humidity").textContent = String(humidity) + "%";
+            document.getElementById("username").textContent = username;
+            document.getElementById("keep-title").textContent = "Keep\u00a0•\u00a0" + keep_title;
+            document.getElementById("speed").textContent = paceText;
+            document.getElementById("cost-time").textContent = RunRoute.formatClock(total, true) || "—";
+            document.getElementById("calorie").textContent = calorie;
         }
 
         //选择预设图片
@@ -675,10 +734,14 @@
             display_guijiSelect_id = document.getElementById("default_bgImgSelect").value;
             document.getElementById(display_guijiSelect_id).style.display = "inline"
             default_bgSRC = eval(document.getElementById(display_guijiSelect_id).value);
+            use_default_bg = true;
+            document.getElementById("setbgimg_reset_btn").className = "init-btn";
             setbgImg(default_bgSRC[0]);
         }
         function guijiSelect_onChange() {
             default_bgSRC = eval(document.getElementById(display_guijiSelect_id).value);
+            use_default_bg = true;
+            document.getElementById("setbgimg_reset_btn").className = "init-btn";
             setbgImg(default_bgSRC[0]);
         }
         //选择天气
@@ -688,10 +751,8 @@
 
         function dataURLtoBlob(dataurl) {
             var arr = dataurl.split(',');
-            //注意base64的最后面中括号和引号是不转译的   
-            var _arr = arr[1].substring(0, arr[1].length - 2);
             var mime = arr[0].match(/:(.*?);/)[1],
-                bstr = atob(_arr),
+                bstr = atob(arr[1]),
                 n = bstr.length,
                 u8arr = new Uint8Array(n);
             while (n--) {
@@ -726,7 +787,7 @@
                 document.getElementById("setbgimg_reset_btn").className = "";
             }
             var bgimg_ofile = document.getElementById("inpt_bgimg").files[0];
-            bgimg_oFReader.readAsDataURL(bgimg_ofile);
+            if (bgimg_ofile) bgimg_oFReader.readAsDataURL(bgimg_ofile);
         }
         function setbgImg(src) {
             document.getElementById("bg-img").src = src;
@@ -771,7 +832,7 @@
                 }
             }
             var portrait_ofile = document.getElementById("inpt_portrait").files[0];
-            portrait_oFReader.readAsDataURL(portrait_ofile);
+            if (portrait_ofile) portrait_oFReader.readAsDataURL(portrait_ofile);
         }
         //恢复默认背景图片
         function init_bgimg() {
@@ -989,6 +1050,7 @@
             document.body.removeEventListener('touchmove', this.welcomeShowedListener, false);
             document.getElementById("bg-img").src = canvas.toDataURL();
             document.getElementById("drawpic_overlay").style.display = "none";
+            document.dispatchEvent(new Event("legacy-route-confirmed"));
         }
         //获取当前使用的背景图片的尺寸
         function getNaturalSize () {
@@ -1000,7 +1062,12 @@
 
         //下载截图
         function Download(func=Download1) {
+            setData();
             let ele = document.getElementById("new-Img");
+            if (!Number.isInteger(savePic_width) || savePic_width < 1 || savePic_width > 4000) {
+                document.getElementById("route-status").textContent = "图片宽度请输入 1 至 4000 像素。";
+                return;
+            }
             buffer_canvas = document.getElementById("buffer_canvas");
             buffer_canvas.width = savePic_width;
             buffer_canvas.height = Math.floor(savePic_width * 2157 / 1080);
@@ -1009,8 +1076,8 @@
                 canvas: buffer_canvas,
                 useCORS: true,
                 logging: false,
-                height: buffer_canvas.height,
-                width: buffer_canvas.width,
+                height: ele.clientHeight,
+                width: ele.clientWidth,
                 scale: scale,
             }).then(func);
         }
@@ -1055,7 +1122,7 @@
         //初始化
         window.onload = function() {
             miles = Math.floor((2 + Math.random() * 3) * 100) / 100;
-            speeds = Math.floor((4 + Math.random() * 6) * 100) / 100;
+            speeds = 240 + Math.floor(Math.random() * 360);
             let datetime_now = new Date();
             date_year = datetime_now.getFullYear();
             date_month = datetime_now.getMonth() + 1;
@@ -1080,5 +1147,6 @@
             rander();
         }
     </script>
+    <script src="./route-editor.js"></script>
 </body>
 </html>
