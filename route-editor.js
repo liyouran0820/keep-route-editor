@@ -12,7 +12,7 @@
     const SCALE = 3;
     const DEFAULT_COLOR = "#26c99a";
     const COLORS = ["#26c99a", "#48ddad", "#b7ed75", "#f1d96e", "#ff9868", "#35c8d5"];
-    const PACE_COLORS = ["#109cd1", "#129f94", "#38a75f", "#dca626", "#db6746"];
+    const PACE_COLORS = [[29, 159, 211], [19, 176, 161], [28, 178, 112], [223, 167, 43], [220, 100, 69]];
 
     const layer = document.createElement("canvas");
     layer.id = "editable-route-layer";
@@ -120,14 +120,25 @@
         const values = paces?.flat().filter(value => value != null).sort((a, b) => a - b);
         if (!values?.length) return null;
         const last = values.length - 1;
-        return [values[Math.floor(last * 0.1)], values[Math.ceil(last * 0.9)]];
+        const midpoint = values[Math.floor(last / 2)];
+        const minimumSpan = Math.max(24, midpoint * 0.09);
+        return {
+            midpoint,
+            fastSpan: Math.max(minimumSpan, midpoint - values[Math.floor(last * 0.1)]),
+            slowSpan: Math.max(minimumSpan, values[Math.ceil(last * 0.9)] - midpoint),
+        };
     }
 
     function paceColor(pace) {
         if (pace === null) return DEFAULT_COLOR;
-        const [fast, slow] = paceRange;
-        if (slow - fast < 1) return PACE_COLORS[2];
-        return PACE_COLORS[Math.round(clamp((pace - fast) / (slow - fast), 0, 1) * (PACE_COLORS.length - 1))];
+        const { midpoint, fastSpan, slowSpan } = paceRange;
+        const ratio = clamp((pace - midpoint) / (pace < midpoint ? fastSpan : slowSpan), -1, 1);
+        const position = Math.round((1 + ratio) * 16) / 8;
+        const from = PACE_COLORS[Math.floor(position)];
+        const to = PACE_COLORS[Math.ceil(position)];
+        const blend = position % 1;
+        const channels = from.map((channel, index) => Math.round(channel + (to[index] - channel) * blend));
+        return "rgb(" + channels.join(",") + ")";
     }
 
     function drawPaths(paths, frame, active) {
@@ -151,11 +162,11 @@
 
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
-        for (const [pathIndex, path] of paths.entries()) {
-            const points = path.map(point => position(point, frame));
-            ctx.lineWidth = multipleLaps ? 2.9 : 6.5;
-            line(points, "#ffffffbd");
-            ctx.lineWidth = multipleLaps ? 1.9 : 4.6;
+        const plotted = paths.map(path => path.map(point => position(point, frame)));
+        ctx.lineWidth = multipleLaps ? 5.8 : 6.5;
+        for (const points of plotted) line(points, "#ffffffe0");
+        ctx.lineWidth = multipleLaps ? 4 : 4.6;
+        for (const [pathIndex, points] of plotted.entries()) {
             if (paces) {
                 let start = 0;
                 const colors = paces[pathIndex].map(paceColor);

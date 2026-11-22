@@ -50,6 +50,30 @@
     return 12742000 * Math.asin(Math.sqrt(clamp(h, 0, 1)));
   }
 
+  function paceByDistance(edges) {
+    const distance = [0];
+    const timedDistance = [0];
+    const time = [0];
+    for (const { meters, seconds } of edges) {
+      const timed = meters >= 1 && Number.isFinite(seconds) && seconds > 0;
+      distance.push(distance.at(-1) + meters);
+      timedDistance.push(timedDistance.at(-1) + (timed ? meters : 0));
+      time.push(time.at(-1) + (timed ? seconds : 0));
+    }
+
+    let first = 0;
+    let end = 1;
+    return edges.map((_, i) => {
+      if (time[i + 1] === time[i]) return null;
+      const center = (distance[i] + distance[i + 1]) / 2;
+      // A short distance window keeps a single noisy GPS point from dominating the color.
+      while (first < i && distance[first + 1] <= center - 18) first += 1;
+      end = Math.max(end, i + 1);
+      while (end < edges.length && distance[end] < center + 18) end += 1;
+      return (time[end] - time[first]) * 1000 / (timedDistance[end] - timedDistance[first]);
+    });
+  }
+
   function parseGpx(text, filename) {
     const xml = new DOMParser().parseFromString(text, "application/xml");
     if (xml.documentElement.localName !== "gpx" || xml.getElementsByTagName("parsererror").length) {
@@ -86,21 +110,20 @@
     let allSegmentsTimed = true;
     const paces = [];
     const projected = segments.map(points => {
-      const edgePaces = [];
-      paces.push(edgePaces);
+      const edges = [];
       const first = points[0].time;
       const last = points.at(-1).time;
       if (Number.isFinite(first)) startTime = Math.min(startTime ?? first, first);
       if (Number.isFinite(first) && Number.isFinite(last) && last >= first) durationSeconds += (last - first) / 1000;
       else allSegmentsTimed = false;
 
-      return points.map((point, i) => {
+      const coordinates = points.map((point, i) => {
         if (i > 0) {
           const previous = points[i - 1];
           const meters = gpsDistance(previous, point);
           const seconds = (point.time - previous.time) / 1000;
           distanceMeters += meters;
-          edgePaces.push(meters >= 1 && Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 / meters : null);
+          edges.push({ meters, seconds });
         }
         const x = ((point.lon - origin.lon + 540) % 360 - 180) * cosLat;
         const y = origin.lat - point.lat;
@@ -110,6 +133,8 @@
         bounds.maxY = Math.max(bounds.maxY, y);
         return [x, y];
       });
+      paces.push(paceByDistance(edges));
+      return coordinates;
     });
     const span = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
     if (span === 0) throw new Error("GPX 轨迹点重合，无法绘制路线。");

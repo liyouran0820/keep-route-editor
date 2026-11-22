@@ -3,6 +3,7 @@
 import argparse
 import json
 import math
+import random
 from pathlib import Path
 
 
@@ -38,6 +39,18 @@ def interpolate(start, end, fraction):
     return [a + (b - a) * fraction for a, b in zip(start, end)]
 
 
+def round_loop_corners(points):
+    rounded = [points[0]]
+    for before, vertex, after in zip(points, points[1:], points[2:]):
+        incoming, outgoing = math.dist(before, vertex), math.dist(vertex, after)
+        cut = min(22, 0.22 * incoming, 0.22 * outgoing)
+        start = interpolate(vertex, before, cut / incoming)
+        end = interpolate(vertex, after, cut / outgoing)
+        for t in (0, 0.25, 0.5, 0.75, 1):
+            rounded.append(interpolate(interpolate(start, vertex, t), interpolate(vertex, end, t), t))
+    return rounded + points[-1:]
+
+
 def sample_loop(points, edge_lengths, point_budget):
     sampled = [points[0]]
     extra_points = point_budget - len(points)
@@ -57,16 +70,19 @@ def offset_loop(points, edge_lengths, lap_index, drift_pixels):
     offset_points = []
     traveled = 0
     perimeter = sum(edge_lengths)
-    phase = (lap_index + 1) * 0.61803398875
+    rng = random.Random(734 + lap_index)
+    # A slow lateral drift persists for a stretch and then rejoins the track.
+    windows = [
+        (rng.uniform(start, start + 0.12), rng.uniform(end, end + 0.10),
+         rng.uniform(0.40, 1.0) * rng.choice((-1, 1)))
+        for start, end in ((0.06, 0.31), (0.50, 0.83))
+    ]
     for index, point in enumerate(points[:-1]):
         progress = traveled / perimeter
-        # Shared stretches anchor the loops. The signed drift varies within each intervening stretch.
-        window = max(0, (abs(math.sin(3 * math.pi * progress)) - 0.62) / 0.38)
-        drift = (
-            0.75 * math.sin(math.tau * (2 * progress + phase)) +
-            0.25 * math.sin(math.tau * (3 * progress - 2 * phase))
+        offset = drift_pixels * sum(
+            amplitude * math.sin(math.pi * (progress - start) / (end - start)) ** 2
+            for start, end, amplitude in windows if start < progress < end
         )
-        offset = drift_pixels * window ** 2 * drift
         before, after = normals[index - 1], normals[index]
         divisor = max(0.5, 1 + sum(a * b for a, b in zip(before, after)))
         offset_points.append([value + offset * (a + b) / divisor for value, a, b in zip(point, before, after)])
@@ -107,6 +123,9 @@ def make_laps(points, loop, distance, width, height):
     count = int(full) + bool(partial)
     if count * len(points) > 100000:
         raise ValueError("repeated route exceeds 100,000 points")
+    if (5 * (len(points) - 2) + 2) * count <= 100000:
+        points = round_loop_corners(points)
+        edges = lengths(points)
     if count > 1:
         points = sample_loop(points, edges, 100000 // count)
         edges = lengths(points)
