@@ -220,33 +220,24 @@
         if (!startPin.naturalWidth || !finishPin.naturalWidth) return;
         const start = transform(position(paths[0][0], frame));
         const finish = transform(position(paths.at(-1).at(-1), frame));
-        const nearby = Math.hypot(start[0] - finish[0], start[1] - finish[1]) < 22;
+        const distance = Math.hypot(start[0] - finish[0], start[1] - finish[1]);
+        // Let nearby heads fan out without moving either pin's tip off the route.
+        const tilt = (start[0] <= finish[0] ? 1 : -1) * 0.68 * Math.max(0, 1 - distance / 22);
 
-        function pin(image, tip, anchor) {
-            if (anchor) {
-                ctx.beginPath();
-                ctx.moveTo(...anchor);
-                ctx.lineTo(...tip);
-                ctx.lineWidth = 2;
-                ctx.strokeStyle = "#ffffff";
-                ctx.stroke();
-            }
-            ctx.drawImage(image, tip[0] - PIN_SIZE / 2, tip[1] - PIN_SIZE * PIN_TIP, PIN_SIZE, PIN_SIZE);
+        function pin(image, tip, angle) {
+            ctx.save();
+            ctx.translate(...tip);
+            ctx.rotate(angle);
+            ctx.drawImage(image, -PIN_SIZE / 2, -PIN_SIZE * PIN_TIP, PIN_SIZE, PIN_SIZE);
+            ctx.restore();
         }
 
         ctx.save();
         ctx.beginPath();
         ctx.rect(0, 0, WIDTH, MAP_HEIGHT);
         ctx.clip();
-        if (nearby) {
-            const x = clamp((start[0] + finish[0]) / 2, 24, WIDTH - 24);
-            const y = Math.max(25, Math.min(start[1], finish[1]) - 9);
-            pin(startPin, [x - 12, y], start);
-            pin(finishPin, [x + 12, y], finish);
-        } else {
-            pin(startPin, start);
-            pin(finishPin, finish);
-        }
+        pin(startPin, start, -tilt);
+        pin(finishPin, finish, tilt);
         ctx.restore();
     }
 

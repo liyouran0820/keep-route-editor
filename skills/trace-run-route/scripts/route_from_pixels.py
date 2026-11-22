@@ -62,11 +62,20 @@ def sample_loop(points, edge_lengths, point_budget):
     return sampled
 
 
-def offset_loop(points, edge_lengths, lap_index, drift_pixels):
+def offset_loop(points, edge_lengths, lap_index, drift_pixels, start_offset, end_offset):
     normals = [
         (-(b[1] - a[1]) / length, (b[0] - a[0]) / length)
         for a, b, length in zip(points, points[1:], edge_lengths)
     ]
+
+    def shift(index, point, offset):
+        before, after = normals[index - 1], normals[index]
+        divisor = max(0.5, 1 + sum(a * b for a, b in zip(before, after)))
+        return [value + offset * (a + b) / divisor for value, a, b in zip(point, before, after)]
+
+    def taper(distance):
+        return math.cos(math.pi * distance / 0.24) ** 2 if distance < 0.12 else 0
+
     offset_points = []
     traveled = 0
     perimeter = sum(edge_lengths)
@@ -83,11 +92,10 @@ def offset_loop(points, edge_lengths, lap_index, drift_pixels):
             amplitude * math.sin(math.pi * (progress - start) / (end - start)) ** 2
             for start, end, amplitude in windows if start < progress < end
         )
-        before, after = normals[index - 1], normals[index]
-        divisor = max(0.5, 1 + sum(a * b for a, b in zip(before, after)))
-        offset_points.append([value + offset * (a + b) / divisor for value, a, b in zip(point, before, after)])
+        offset += start_offset * taper(progress) + end_offset * taper(1 - progress)
+        offset_points.append(shift(index, point, offset))
         traveled += edge_lengths[index]
-    return offset_points + offset_points[:1]
+    return offset_points + [shift(0, points[0], end_offset)]
 
 
 def trim_path(points, meters, target):
@@ -126,15 +134,18 @@ def make_laps(points, loop, distance, width, height):
     if (5 * (len(points) - 2) + 2) * count <= 100000:
         points = round_loop_corners(points)
         edges = lengths(points)
-    if count > 1:
+    if full:
         points = sample_loop(points, edges, 100000 // count)
         edges = lengths(points)
     meter_scale = lap_meters / sum(edges)
     edge_meters = [edge * meter_scale for edge in edges]
+    rng = random.Random(318)
+    # Adjacent laps share a crossing point. The last crossing drifts a little from the first.
+    crossings = [-0.30 * drift] + [drift * rng.uniform(-0.28, 0.28) for _ in range(1, count)] + [0.42 * drift]
     paths = []
     all_meters = []
     for index in range(count):
-        path = offset_loop(points, edges, index, drift) if count > 1 else points
+        path = offset_loop(points, edges, index, drift, crossings[index], crossings[index + 1]) if full else points
         meters = edge_meters
         if partial and index == count - 1:
             path, meters = trim_path(path, edge_meters, partial)
