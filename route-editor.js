@@ -220,19 +220,17 @@
         if (!startPin.naturalWidth || !finishPin.naturalWidth) return;
         const start = transform(position(paths[0][0], frame));
         const finish = transform(position(paths.at(-1).at(-1), frame));
-        const distance = Math.hypot(start[0] - finish[0], start[1] - finish[1]);
-        const finishSize = PIN_SIZE * (0.56 + 0.44 * Math.min(distance / 22, 1));
 
-        function pin(image, [x, y], size) {
-            ctx.drawImage(image, x - size / 2, y - size * PIN_TIP, size, size);
+        function pin(image, [x, y]) {
+            ctx.drawImage(image, x - PIN_SIZE / 2, y - PIN_SIZE * PIN_TIP, PIN_SIZE, PIN_SIZE);
         }
 
         ctx.save();
         ctx.beginPath();
         ctx.rect(0, 0, WIDTH, MAP_HEIGHT);
         ctx.clip();
-        pin(startPin, start, PIN_SIZE);
-        pin(finishPin, finish, finishSize);
+        pin(startPin, start);
+        pin(finishPin, finish);
         ctx.restore();
     }
 
