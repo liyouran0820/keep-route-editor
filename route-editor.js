@@ -221,23 +221,18 @@
         const start = transform(position(paths[0][0], frame));
         const finish = transform(position(paths.at(-1).at(-1), frame));
         const distance = Math.hypot(start[0] - finish[0], start[1] - finish[1]);
-        // Let nearby heads fan out without moving either pin's tip off the route.
-        const tilt = (start[0] <= finish[0] ? 1 : -1) * 0.68 * Math.max(0, 1 - distance / 22);
+        const finishSize = PIN_SIZE * (0.56 + 0.44 * Math.min(distance / 22, 1));
 
-        function pin(image, tip, angle) {
-            ctx.save();
-            ctx.translate(...tip);
-            ctx.rotate(angle);
-            ctx.drawImage(image, -PIN_SIZE / 2, -PIN_SIZE * PIN_TIP, PIN_SIZE, PIN_SIZE);
-            ctx.restore();
+        function pin(image, [x, y], size) {
+            ctx.drawImage(image, x - size / 2, y - size * PIN_TIP, size, size);
         }
 
         ctx.save();
         ctx.beginPath();
         ctx.rect(0, 0, WIDTH, MAP_HEIGHT);
         ctx.clip();
-        pin(startPin, start, -tilt);
-        pin(finishPin, finish, tilt);
+        pin(startPin, start, PIN_SIZE);
+        pin(finishPin, finish, finishSize);
         ctx.restore();
     }
 
